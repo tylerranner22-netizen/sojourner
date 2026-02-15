@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sojourner: Calcidas & Eryndor</title>
+<style>
+#gameContainer { background:#121212; color:#eee; padding:20px; font-family:Arial; min-height:700px; }
+button{ margin:4px; padding:6px 10px; background:#333; color:white; border:1px solid #555; cursor:pointer; }
+button:hover{background:#444;}
+button:disabled{ background:#555; cursor:not-allowed; }
+.panel{ display:none; margin-top:10px; padding:8px; background:#1e1e1e; border:1px solid #333; }
+#eventLog{ margin-top:12px; height:220px; overflow-y:auto; background:#1a1a1a; border:1px solid #333; padding:8px; }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <div id="introPanel">
+    <h2>Welcome, Sojourner</h2>
+    <p>
+      You are a <strong>Sojourner</strong>, traveling to the mysterious lands of <strong>Calcidas</strong> and <strong>Eryndor</strong>.
+      Legends speak of treasures and dangers across these lands. Your journey begins in the Dark Forest.
+    </p>
+    <button id="startGameBtn">Begin Adventure</button>
+  </div>
+
+  <div id="hud" style="display:none;">
+    <div id="stats"></div>
+    <button id="exploreBtn">Explore</button>
+    <button id="inventoryToggle">Inventory</button>
+    <button id="statsToggle">Stats</button>
+    <button id="equipmentToggle">Equipment</button>
+  </div>
+
+  <div id="inventoryPanel" class="panel"></div>
+  <div id="statsPanel" class="panel"></div>
+  <div id="equipmentPanel" class="panel"></div>
+  <div id="combatPanel" class="panel"></div>
+  <div id="eventLog"></div>
+</div>
+
+<script type="text/javascript">
+document.addEventListener("DOMContentLoaded", () => {
+
+  // ===== VARIABLES =====
+  let player, inventory=[], enemy=null;
+  let inBattle=false;
+  let currentRegion="Dark Forest";
+  let exploreCount=0;
+
+  let roadToCalcidasCount=0;
+  let roadToNoiCount=0;
+  let onRoadToCalcidas=false;
+  let roadToEryndorCount=0;
+  let onRoadToEryndor=false;
+  let onRoadToCaves = false;
+  let caveTravelCount = 0;
+  let onRoadToNorthreach = false;
+  let roadToNorthreachCount = 0;
+
+  const statsEl=document.getElementById("stats");
+  const logBox=document.getElementById("eventLog");
+  const combatPanel=document.getElementById("combatPanel");
+  const inventoryPanel=document.getElementById("inventoryPanel");
+  const statsPanel=document.getElementById("statsPanel");
+  const equipmentPanel=document.getElementById("equipmentPanel");
+
+  // ===== UTIL =====
+  function log(msg,color="#eee"){
+    const div=document.createElement("div");
+    div.style.color=color;
+    div.innerHTML=msg;
+    logBox.appendChild(div);
+    logBox.scrollTop=logBox.scrollHeight;
+  }
+
+  function mod(v){ return Math.floor((v-10)/2); }
+
+  function totalAC(){
+    let ac=10+mod(player.dex);
+    Object.values(player.equipment).forEach(e=>{
+      if(e?.ac) ac+=e.ac;
+    });
+    return ac;
+  }
+
+  function updateHUD(){
+    statsEl.innerHTML=
+    `📍 ${currentRegion} | ❤️ ${player.hp}/${player.maxHp} | ⭐ Lvl ${player.level} | ⚡ ${player.xp}/${player.nextXp} | 🛡 AC ${totalAC()} | 💰 ${player.gold} | 📈 ${player.statPoints} pts`;
+  }
+
+  // ===== PANELS =====
+  function togglePanel(panel, renderFunction){
+    const isVisible = window.getComputedStyle(panel).display !== "none";
+    inventoryPanel.style.display="none";
+    statsPanel.style.display="none";
+    equipmentPanel.style.display="none";
+
+    if(!isVisible){
+      panel.style.display="block";
+      renderFunction();
+    }
+  }
+
+  // ===== START GAME =====
+  function startGame(){
+    player={
+      level:1,xp:0,nextXp:50,gold:0,
+      str:10,dex:10,con:10,wis:10,int:10,cha:10,
+      statPoints:0,
+      equipment:{weapon:null,helmet:null,chest:null,greaves:null,boots:null,gloves:null}
+    };
+    player.maxHp=20;
+    player.hp=20;
+
+    inventory=[
+      {name:"Sword",type:"weapon",attack:3},
+      {name:"Cloth Helmet",type:"helmet",ac:1},
+      {name:"Leather Chest",type:"chest",ac:2},
+      {name:"Leather Greaves",type:"greaves",ac:1},
+      {name:"Leather Boots",type:"boots",ac:1},
+      {name:"Cloth Gloves",type:"gloves",ac:1},
+      {name:"Health Potion",type:"consumable",heal:10},
+      {name:"Health Potion",type:"consumable",heal:10}
+    ];
+
+    currentRegion="Dark Forest";
+    exploreCount=0;
+    inBattle=false;
+    onRoadToCalcidas=false; roadToCalcidasCount=0;
+    onRoadToEryndor=false; roadToEryndorCount=0;
+    roadToNoiCount=0;
+    onRoadToNorthreach = false; roadToNorthreachCount = 0;
+
+    inventoryPanel.style.display="none";
+    statsPanel.style.display="none";
+    equipmentPanel.style.display="none";
+
+    document.getElementById("introPanel").style.display="none";
+    document.getElementById("hud").style.display="block";
+
+    logBox.innerHTML="";
+    log("You awaken in the Dark Forest...");
+    updateHUD();
+  }
+
+  // ===== TRAVEL & EXPLORE =====
+  function resetTravel(){
+    onRoadToCalcidas = false;
+    onRoadToEryndor = false;
+    onRoadToCaves = false;
+    roadToCalcidasCount = 0;
+    roadToEryndorCount = 0;
+    roadToNoiCount = 0;
+    caveTravelCount = 0;
+    onRoadToNorthreach = false;
+    roadToNorthreachCount = 0;
+  }
+
+  function startTravel(destination, days){
+    resetTravel();
+    if(destination === "Calcidas"){ onRoadToCalcidas = true; roadToCalcidasCount = days; }
+    if(destination === "Eryndor"){ onRoadToEryndor = true; roadToEryndorCount = days; }
+    if(destination === "Noi"){ roadToNoiCount = days; }
+    if(destination === "Caves"){ onRoadToCaves = true; caveTravelCount = days; }
+    if(destination === "Northreach"){ onRoadToNorthreach = true; roadToNorthreachCount = days; }
+    logBox.innerHTML="";
+    log(`You begin your journey toward ${destination}.`);
+  }
+
+  function maybeEncounter(){
+    if(Math.random() >= 0.4) return false;
+    let regionEnemies = [];
+
+    if(currentRegion === "Dark Forest") regionEnemies = ["Goblin","Giant Spider"];
+    if(currentRegion === "Calcidas") regionEnemies = ["Bandit"];
+    if(currentRegion === "Eryndor") regionEnemies = ["Dark Goblin","Bandit"];
+    if(currentRegion === "Seabrine") regionEnemies = ["Bandit"];
+    if(onRoadToCalcidas || onRoadToEryndor) regionEnemies = ["Bandit","Goblin"];
+    if(onRoadToCaves) regionEnemies = ["Cave Bat","Giant Spider","Dark Goblin"];
+    if(currentRegion === "Northreach") regionEnemies = ["Bandit","Dark Goblin"];
+    if(regionEnemies.length === 0) return false;
+
+    const enemyType = regionEnemies[Math.floor(Math.random()*regionEnemies.length)];
+    startCombat(enemyType);
+    return true;
+  }
+
+  function explore(){
+    if(inBattle) return;
+
+    if(roadToNoiCount>0){ roadToNoiCount--; if(roadToNoiCount===0){ resetTravel(); currentRegion="Village of Noi"; logBox.innerHTML=""; log("You arrive back in the Village of Noi.","cyan"); showNoiOptions(); updateHUD(); return; } log(`You travel to Noi. ${roadToNoiCount} days remaining.`); if(maybeEncounter()) return; updateHUD(); return; }
+    if(onRoadToCalcidas && roadToCalcidasCount>0){ roadToCalcidasCount--; if(roadToCalcidasCount===0){ resetTravel(); currentRegion="Calcidas"; logBox.innerHTML=""; log("You arrive in Calcidas.","cyan"); showCalcidasOptions(); updateHUD(); return; } log(`You travel to Calcidas. ${roadToCalcidasCount} days remaining.`); if(maybeEncounter()) return; updateHUD(); return; }
+    if(onRoadToEryndor && roadToEryndorCount>0){ roadToEryndorCount--; if(roadToEryndorCount===0){ resetTravel(); currentRegion="Eryndor"; logBox.innerHTML=""; log("You arrive in Eryndor.","cyan"); showEryndorOptions(); updateHUD(); return; } log(`You travel to Eryndor. ${roadToEryndorCount} days remaining.`); if(maybeEncounter()) return; updateHUD(); return; }
+    if(onRoadToCaves && caveTravelCount>0){ caveTravelCount--; if(caveTravelCount===0){ resetTravel(); currentRegion="Seabrine"; logBox.innerHTML=""; log("After a grueling trek, you finally emerge at the coastal city of Seabrine!","cyan"); showSeabrineOptions(); updateHUD(); return; } log(`You navigate the Dark Caves. ${caveTravelCount} days remaining.`); if(Math.random()<0.5){ const caveEnemies=["Cave Bat","Giant Spider","Dark Goblin"]; const enemyType=caveEnemies[Math.floor(Math.random()*caveEnemies.length)]; startCombat(enemyType); return; } updateHUD(); return; }
+    if(onRoadToNorthreach && roadToNorthreachCount>0){ roadToNorthreachCount--; if(roadToNorthreachCount===0){ resetTravel(); currentRegion="Northreach"; logBox.innerHTML=""; log("You arrive in the northern village of Northreach.","cyan"); showNorthreachOptions(); updateHUD(); return; } log(`You travel north toward Northreach. ${roadToNorthreachCount} days remaining.`); if(maybeEncounter()) return; updateHUD(); return; }
+
+    if(currentRegion==="Dark Forest"){ exploreCount++; log("You explore the forest..."); if(exploreCount>=5){ currentRegion="Village of Noi"; logBox.innerHTML=""; log("You arrive at the Village of Noi.","cyan"); showNoiOptions(); updateHUD(); return; } if(maybeEncounter()) return; }
+    updateHUD();
+  }
+
+  // ===== LOCATION OPTIONS =====
+  function addOption(text,action){
+    const btn=document.createElement("button");
+    btn.innerText=text;
+    btn.onclick=action;
+    logBox.appendChild(btn);
+    logBox.appendChild(document.createElement("br"));
+  }
+
+  function showNoiOptions(){
+    log("From the Village of Noi you may:");
+    addOption("5-Day Travel to Calcidas",()=>startTravel("Calcidas",5));
+    addOption("5-Day Travel to Eryndor",()=>startTravel("Eryndor",5));
+  }
+
+  function showCalcidasOptions(){
+    log("From Calcidas you may:");
+    addOption("Travel worn road North (not functional)",()=>log("This path is blocked for now."));
+    addOption("5-Day Travel back to Noi",()=>startTravel("Noi",5));
+    addOption("6-Day Travel North to Northreach",()=>startTravel("Northreach",6));
+  }
+
+  function showNorthreachOptions(){
+    log("From Northreach you may:");
+    addOption("Visit the Village Hall", ()=>log("The villagers eye you cautiously. This place feels tense."));
+    addOption("Return to Calcidas (6 Days)", ()=>startTravel("Calcidas",6));
+  }
+
+  function showEryndorOptions(){
+    log("From Eryndor you may:");
+    addOption("5-Day Travel through Mountains to Noi",()=>startTravel("Noi",5));
+    addOption("Explore Dark Caves",()=>startTravel("Caves",3));
+  }
+
+  function showSeabrineOptions(){
+    log("From Seabrine you may:");
+    addOption("Visit the Market", ()=>log("You wander through the bustling market, finding exotic goods.","gold"));
+    addOption("Explore the Docks", ()=>log("Ships sail in and out. You feel the salty breeze.","lightblue"));
+    addOption("Return to Eryndor Mountains", ()=>startTravel("Eryndor",5));
+  }
+
+  // ===== COMBAT =====
+  function startCombat(type){
+    inBattle=true;
+    document.getElementById("exploreBtn").disabled=true;
+    combatPanel.style.display="block";
+
+    const enemyData={
+      "Goblin":{name:"Goblin",hp:8,maxHp:8,ac:12,xp:50,dmgMin:1,dmgMax:4,atkBonus:2},
+      "Giant Spider":{name:"Giant Spider",hp:7,maxHp:7,ac:11,xp:100,dmgMin:1,dmgMax:3,atkBonus:3},
+      "Bandit":{name:"Bandit",hp:12,maxHp:12,ac:13,xp:70,dmgMin:2,dmgMax:5,atkBonus:3},
+      "Cave Bat":{name:"Cave Bat",hp:6,maxHp:6,ac:11,xp:40,dmgMin:1,dmgMax:3,atkBonus:2},
+      "Dark Goblin":{name:"Dark Goblin",hp:10,maxHp:10,ac:13,xp:60,dmgMin:2,dmgMax:4,atkBonus:3}
+    };
+
+    enemy=enemyData[type];
+    if(!enemy){ console.error("Enemy not found:",type); return; }
+    log(`${enemy.name} appears!`,"orange");
+    renderCombat();
+  }
+
+  function renderCombat(){
+    combatPanel.innerHTML=`<strong>${enemy.name}</strong> ❤️ ${enemy.hp}/${enemy.maxHp}<br>`;
+    const atkBtn=document.createElement("button");
+    atkBtn.innerText="Attack";
+    atkBtn.onclick=playerAttack;
+    combatPanel.appendChild(atkBtn);
+    const runBtn=document.createElement("button");
+    runBtn.innerText="Run";
+    runBtn.onclick=runCombat;
+    combatPanel.appendChild(runBtn);
+  }
+
+  function playerAttack(){
+    const rawRoll=Math.floor(Math.random()*20)+1;
+    const attackRoll=rawRoll+mod(player.str);
+    let weaponDamage=player.equipment.weapon?Math.floor(Math.random()*6)+1:Math.floor(Math.random()*4)+1;
+    weaponDamage+=mod(player.str);
+
+    if(rawRoll===20){ weaponDamage*=2; log(`🔥 Critical hit! Damage: ${weaponDamage}`,"gold"); enemy.hp-=weaponDamage; }
+    else if(attackRoll>=enemy.ac){ log(`Hit! Damage: ${weaponDamage}`,"lightgreen"); enemy.hp-=weaponDamage; }
+    else { log("Miss.","red"); setTimeout(enemyAttack,500); return; }
+
+    if(enemy.hp<=0){ victory(); return; }
+    renderCombat();
+    setTimeout(enemyAttack,500);
+  }
+
+  function enemyAttack(){
+    const rawRoll = Math.floor(Math.random() * 20) + 1;
+    const attackRoll = rawRoll + enemy.atkBonus;
+
+    if(attackRoll >= totalAC()){
+      const dmg = Math.floor(Math.random() * (enemy.dmgMax - enemy.dmgMin + 1)) + enemy.dmgMin;
+      player.hp -= dmg;
+      log(`${enemy.name} hits for ${dmg}`, "red");
+      if(player.hp <= 0){
+        log("You died!", "red");
+        startGame();
+        return;
+      }
+    } else {
+      log(`${enemy.name} misses.`, "orange");
+    }
+    updateHUD();
+  }
+
+  function victory(){
+    const gold = Math.floor(Math.random() * 10) + 1;
+    player.xp += enemy.xp;
+    player.gold += gold;
+    log(`🎉 Victory! +${enemy.xp} XP | +${gold} Gold`, "gold");
+    inBattle = false;
+    combatPanel.style.display = "none";
+    document.getElementById("exploreBtn").disabled = false;
+    checkLevelUp();
+    updateHUD();
+  }
+
+  function runCombat(){
+    if(Math.random() < 0.5){
+      log("You escape!", "lightblue");
+      inBattle = false;
+      combatPanel.style.display = "none";
+      document.getElementById("exploreBtn").disabled = false;
+    } else {
+      log("Escape failed!", "orange");
+      setTimeout(enemyAttack, 500);
+    }
+  }
+
+  function checkLevelUp(){
+    while(player.xp >= player.nextXp){
+      player.level++;
+      player.xp -= player.nextXp;
+      player.nextXp = Math.floor(player.nextXp * 1.5);
+      player.statPoints += 2;
+
+      const hpGain = Math.floor(Math.random() * 6) + 1 + mod(player.con);
+      player.maxHp += hpGain;
+      player.hp += hpGain;
+
+      log(`🎉 Level Up! You are now level ${player.level}. +${hpGain} HP gained. You have 2 stat points to allocate.`, "cyan");
+
+      renderStats();
+      updateHUD();
+    }
+  }
+
+function renderInventory(){
+    inventoryPanel.innerHTML = "<h3>Inventory</h3>";
+    inventory.forEach((item,index)=>{
+        const div=document.createElement("div");
+        let stat="";
+        if(item.ac) stat=" (+AC "+item.ac+")";
+        if(item.attack) stat=" (+ATK "+item.attack+")";
+        div.innerHTML=item.name + stat;
+
+        // Consumables
+        if(item.type === "consumable"){
+            const useBtn = document.createElement("button");
+            useBtn.innerText = "Use";
+            useBtn.onclick = () => {
+                player.hp += item.heal;
+                if(player.hp > player.maxHp) player.hp = player.maxHp;
+                inventory.splice(index,1);
+                log(`You use ${item.name} and heal ${item.heal} HP.`, "lightgreen");
+                updateHUD();
+                renderInventory();
+            };
+            div.appendChild(useBtn);
+
+        // Equipment
+        } else {
+            const eqBtn = document.createElement("button");
+            eqBtn.innerText = "Equip";
+            eqBtn.onclick = () => {
+                const slot = item.type;
+                if(player.equipment[slot]) inventory.push(player.equipment[slot]);
+                player.equipment[slot] = item;
+                inventory.splice(index,1);
+                log(`${item.name} equipped.`, "lightgreen");
+                updateHUD();
+                renderInventory();
+                renderEquipment();
+            };
+            div.appendChild(eqBtn);
+        }
+
+        inventoryPanel.appendChild(div);
+    });
+}
+
+  function renderEquipment(){
+    equipmentPanel.innerHTML = "<h3>Equipment</h3>" +
+      Object.entries(player.equipment).map(([k,v]) => k + ": " + (v?.name || "None")).join("<br>");
+  }
+
+  // ===== BUTTON HOOKUPS =====
+  document.getElementById("inventoryToggle").onclick = () => togglePanel(inventoryPanel, renderInventory);
+  document.getElementById("statsToggle").onclick = () => togglePanel(statsPanel, renderStats);
+  document.getElementById("equipmentToggle").onclick = () => togglePanel(equipmentPanel, renderEquipment);
+  document.getElementById("startGameBtn").onclick = startGame;
+  document.getElementById("exploreBtn").onclick = explore;
+
+});
+</script>
+</body>
+</html>
